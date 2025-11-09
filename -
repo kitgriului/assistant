@@ -1,0 +1,21 @@
+"""Authentication utilities: password hashing and verification."""
+
+# Временная версия без bcrypt для тестирования
+# TODO: Установить bcrypt и использовать настоящее хеширование!
+
+def hash_password(password: str) -> str:
+    """
+    Хеширует пароль.
+    ВНИМАНИЕ: Это временная реализация для тестирования!
+    В production используйте bcrypt!
+    """
+    # Простое "хеширование" для теста - НЕ БЕЗОПАСНО!
+    return f"SIMPLE_HASH_{password}"
+
+
+def verify_password(password: str, password_hash: str) -> bool:
+    """
+    Проверяет соответствие пароля хешу.
+    ВНИМАНИЕ: Это временная реализация для тестирования!
+    """
+    return password_hash == f"SIMPLE_HASH_{password}"

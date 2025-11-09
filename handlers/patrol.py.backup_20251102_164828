@@ -1,0 +1,1211 @@
+"""
+Handlers for patrol functionality - patrol routes with checkpoints, photos and geolocation.
+"""
+from aiogram import Router, F, types
+from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.types import (
+    InlineKeyboardMarkup, 
+    InlineKeyboardButton, 
+    ReplyKeyboardMarkup, 
+    KeyboardButton,
+    ReplyKeyboardRemove
+)
+from sqlalchemy import select, func
+from sqlalchemy.orm import selectinload
+import datetime
+import logging
+
+from states.guard import PatrolStates
+from database.session import get_session
+from database.models import (
+    User, 
+    PatrolEvent, 
+    PatrolCheckpoint, 
+    CheckpointPhoto
+)
+from utils.media import save_file
+from utils.user_helpers import check_user_access
+from utils.constants import Role
+from utils.constants import Role
+
+logger = logging.getLogger(__name__)
+router = Router()
+
+
+@router.callback_query(F.data == "menu_patrol_management")
+async def open_patrol_menu(callback: types.CallbackQuery, state: FSMContext):
+    """Open patrol management entrypoint: suggest continue or start new."""
+    telegram_id = callback.from_user.id
+    has_access, user = await check_user_access(telegram_id, [Role.GUARD.value, Role.ADMIN.value])
+    if not has_access:
+        await callback.answer("❌ Нет прав", show_alert=True)
+        return
+
+    # Check active patrol
+    async with get_session() as session:
+        result = await session.execute(
+            select(PatrolEvent)
+            .options(selectinload(PatrolEvent.checkpoints))
+            .where(
+                PatrolEvent.guard_id == user.id,
+                PatrolEvent.status == 'in_progress'
+            )
+        )
+        active_patrol = result.scalar_one_or_none()
+
+    # Адаптивное меню в зависимости от наличия активного обхода
+    buttons = []
+    
+    if active_patrol:
+        checkpoints_count = len(active_patrol.checkpoints)
+        started_at = active_patrol.started_at
+        text = (
+            "🛡️ <b>Управление обходами</b>\n\n"
+            "✅ Есть активный обход\n"
+            f"📅 Начат: {started_at.strftime('%d.%m.%Y %H:%M')}\n"
+            f"📍 Точек: {checkpoints_count}\n\n"
+            "Выберите действие:"
+        )
+        
+        buttons = [
+            [InlineKeyboardButton(text="▶️ Продолжить обход", callback_data="patrol_continue")],
+            [InlineKeyboardButton(text="📊 Статистика", callback_data="patrol_stats")],
+            [InlineKeyboardButton(text="✅ Завершить обход", callback_data="patrol_finish")],
+        ]
+    else:
+        text = (
+            "🛡️ <b>Управление обходами</b>\n\n"
+            "Нет активного обхода.\n\n"
+            "Начните новый обход или посмотрите архив завершённых."
+        )
+        
+        buttons = [
+            [InlineKeyboardButton(text="🚶 Начать новый обход", callback_data="menu_start_patrol")],
+        ]
+    
+    # Общие кнопки (доступны всегда)
+    buttons.extend([
+        [InlineKeyboardButton(text="� Архив обходов", callback_data="patrol_archive")],
+        [InlineKeyboardButton(text="↩️ В главное меню", callback_data="main_menu")],
+    ])
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+
+    await callback.message.edit_text(
+        text,
+        reply_markup=keyboard,
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.message(Command("patrols"))
+async def patrols_command(message: types.Message, state: FSMContext):
+    """Direct command to open patrol management submenu for non-guest roles."""
+    await open_patrol_menu(type("Obj", (), {"from_user": message.from_user, "message": message})(), state)  # reuse callback flow
+
+
+@router.callback_query(F.data == "menu_start_patrol")
+async def start_new_patrol(callback: types.CallbackQuery, state: FSMContext):
+    """Начать новый обход"""
+    telegram_id = callback.from_user.id
+    
+    # Проверяем права доступа
+    has_access, user = await check_user_access(telegram_id, [Role.GUARD.value, Role.ADMIN.value])
+    
+    if not has_access:
+        await callback.answer("❌ Доступ запрещен", show_alert=True)
+        return
+    
+    # Проверяем, нет ли уже активного обхода
+    async with get_session() as session:
+        result = await session.execute(
+            select(PatrolEvent)
+            .options(selectinload(PatrolEvent.checkpoints))
+            .where(
+                PatrolEvent.guard_id == user.id,
+                PatrolEvent.status == 'in_progress'
+            )
+        )
+        active_patrol = result.scalar_one_or_none()
+        
+        if active_patrol:
+            # Предложим продолжить существующий
+            checkpoints_count = len(active_patrol.checkpoints)
+            started_at = active_patrol.started_at
+            
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="▶️ Продолжить текущий обход", callback_data="patrol_continue")],
+                [InlineKeyboardButton(text="❌ Завершить текущий и начать новый", callback_data="patrol_finish_and_new")],
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="main_menu")]
+            ])
+            
+            await callback.message.edit_text(
+                "⚠️ <b>У вас уже есть активный обход</b>\n\n"
+                f"Начат: {started_at.strftime('%d.%m.%Y %H:%M')}\n"
+                f"Точек пройдено: {checkpoints_count}\n\n"
+                "Выберите действие:",
+                reply_markup=keyboard,
+                parse_mode="HTML"
+            )
+            await callback.answer()
+            return
+        
+        # Создаем новое событие обхода
+        new_patrol = PatrolEvent(
+            guard_id=user.id,
+            status='in_progress',
+            started_at=datetime.datetime.utcnow()
+        )
+        session.add(new_patrol)
+        await session.commit()
+        await session.refresh(new_patrol)
+        
+        # Сохраняем ID обхода в состоянии
+        await state.update_data(patrol_event_id=new_patrol.id, checkpoint_number=1)
+        await state.set_state(PatrolStates.in_patrol)
+    
+    await callback.answer("✅ Обход начат!")
+    await show_patrol_menu(callback.message, state)
+
+
+@router.message(Command("start_patrol"))
+async def start_new_patrol_cmd(message: types.Message, state: FSMContext):
+    """Команда: начать новый обход (альтернатива кнопке в меню)."""
+    telegram_id = message.from_user.id
+
+    has_access, user = await check_user_access(telegram_id, [Role.GUARD.value, Role.ADMIN.value])
+    if not has_access:
+        await message.answer("❌ Нет прав для начала обхода")
+        return
+
+    async with get_session() as session:
+        result = await session.execute(
+            select(PatrolEvent)
+            .options(selectinload(PatrolEvent.checkpoints))
+            .where(
+                PatrolEvent.guard_id == user.id,
+                PatrolEvent.status == 'in_progress'
+            )
+        )
+        active_patrol = result.scalar_one_or_none()
+
+        if active_patrol:
+            checkpoints_count = len(active_patrol.checkpoints)
+            started_at = active_patrol.started_at
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="▶️ Продолжить текущий обход", callback_data="patrol_continue")],
+                [InlineKeyboardButton(text="♻️ Завершить и начать новый", callback_data="patrol_finish_and_new")],
+                [InlineKeyboardButton(text="↩️ В меню", callback_data="main_menu")]
+            ])
+            await message.answer(
+                "⚠️ <b>У вас уже есть активный обход</b>\n\n"
+                f"Начат: {started_at.strftime('%d.%m.%Y %H:%M')}\n"
+                f"Точек: {checkpoints_count}\n\n"
+                "Выберите действие:",
+                reply_markup=keyboard,
+                parse_mode="HTML",
+            )
+            return
+
+        new_patrol = PatrolEvent(
+            guard_id=user.id,
+            status='in_progress',
+            started_at=datetime.datetime.utcnow()
+        )
+        session.add(new_patrol)
+        await session.commit()
+        await session.refresh(new_patrol)
+
+        await state.update_data(patrol_event_id=new_patrol.id, checkpoint_number=1)
+        await state.set_state(PatrolStates.in_patrol)
+
+    await message.answer("✅ Обход начат!")
+    await show_patrol_menu(message, state)
+
+
+@router.message(Command("patrol"))
+async def patrol_alias(message: types.Message, state: FSMContext):
+    """Алиас для старта обхода через команду /patrol."""
+    await start_new_patrol_cmd(message, state)
+
+
+@router.message(Command("patrol_menu"))
+async def patrol_menu_command(message: types.Message, state: FSMContext):
+    """Быстрый доступ к меню активного обхода"""
+    telegram_id = message.from_user.id
+    
+    has_access, user = await check_user_access(telegram_id, [Role.GUARD.value, Role.ADMIN.value])
+    
+    if not has_access:
+        await message.answer("❌ Доступ запрещен")
+        return
+    
+    # Проверяем есть ли активный обход
+    data = await state.get_data()
+    patrol_event_id = data.get('patrol_event_id')
+    
+    if not patrol_event_id:
+        # Ищем в БД
+        async with get_session() as session:
+            result = await session.execute(
+                select(PatrolEvent)
+                .where(
+                    PatrolEvent.guard_id == user.id,
+                    PatrolEvent.status == 'in_progress'
+                )
+            )
+            active_patrol = result.scalar_one_or_none()
+            
+            if active_patrol:
+                # Восстанавливаем состояние
+                checkpoint_count = len(active_patrol.checkpoints)
+                await state.update_data(
+                    patrol_event_id=active_patrol.id,
+                    checkpoint_number=checkpoint_count + 1
+                )
+                await state.set_state(PatrolStates.in_patrol)
+            else:
+                await message.answer(
+                    "❌ У вас нет активного обхода.\n\n"
+                    "Используйте /start для входа в главное меню."
+                )
+                return
+    
+    await show_patrol_menu(message, state)
+
+
+@router.callback_query(F.data == "patrol_continue")
+async def continue_patrol(callback: types.CallbackQuery, state: FSMContext):
+    """Продолжить текущий обход"""
+    telegram_id = callback.from_user.id
+    
+    has_access, user = await check_user_access(telegram_id, [Role.GUARD.value, Role.ADMIN.value])
+    
+    if not has_access:
+        await callback.answer("❌ Доступ запрещен", show_alert=True)
+        return
+    
+    async with get_session() as session:
+        result = await session.execute(
+            select(PatrolEvent)
+            .options(selectinload(PatrolEvent.checkpoints))
+            .where(
+                PatrolEvent.guard_id == user.id,
+                PatrolEvent.status == 'in_progress'
+            )
+        )
+        active_patrol = result.scalar_one_or_none()
+        
+        if not active_patrol:
+            await callback.answer("❌ Активный обход не найден", show_alert=True)
+            return
+        
+        checkpoint_count = len(active_patrol.checkpoints)
+        await state.update_data(
+            patrol_event_id=active_patrol.id,
+            checkpoint_number=checkpoint_count + 1
+        )
+        await state.set_state(PatrolStates.in_patrol)
+    
+    await callback.answer("▶️ Продолжаем обход!")
+    await show_patrol_menu(callback.message, state)
+
+
+@router.callback_query(F.data == "patrol_finish_and_new")
+async def finish_and_start_new(callback: types.CallbackQuery, state: FSMContext):
+    """Завершить текущий обход и начать новый"""
+    telegram_id = callback.from_user.id
+    
+    has_access, user = await check_user_access(telegram_id, [Role.GUARD.value, Role.ADMIN.value])
+    
+    if not has_access:
+        await callback.answer("❌ Доступ запрещен", show_alert=True)
+        return
+    
+    async with get_session() as session:
+        # Завершаем текущий обход
+        result = await session.execute(
+            select(PatrolEvent)
+            .where(
+                PatrolEvent.guard_id == user.id,
+                PatrolEvent.status == 'in_progress'
+            )
+        )
+        active_patrol = result.scalar_one_or_none()
+        
+        if active_patrol:
+            active_patrol.status = 'completed'
+            active_patrol.completed_at = datetime.datetime.utcnow()
+        
+        # Создаем новый обход
+        new_patrol = PatrolEvent(
+            guard_id=user.id,
+            status='in_progress',
+            started_at=datetime.datetime.utcnow()
+        )
+        session.add(new_patrol)
+        await session.commit()
+        await session.refresh(new_patrol)
+        
+        await state.update_data(patrol_event_id=new_patrol.id, checkpoint_number=1)
+        await state.set_state(PatrolStates.in_patrol)
+    
+    await callback.answer("✅ Новый обход начат!")
+    await show_patrol_menu(callback.message, state)
+
+
+async def show_patrol_menu(message_or_callback, state: FSMContext):
+    """
+    Показать меню обхода с кнопками действий
+    
+    Args:
+        message_or_callback: Может быть Message или CallbackQuery
+        state: FSM context
+    """
+    data = await state.get_data()
+    checkpoint_number = data.get('checkpoint_number', 1)
+    patrol_event_id = data.get('patrol_event_id')
+    
+    # Получаем информацию об обходе с eager loading checkpoints
+    async with get_session() as session:
+        result = await session.execute(
+            select(PatrolEvent)
+            .options(selectinload(PatrolEvent.checkpoints))
+            .where(PatrolEvent.id == patrol_event_id)
+        )
+        patrol = result.scalar_one_or_none()
+        
+        if not patrol:
+            if isinstance(message_or_callback, types.CallbackQuery):
+                await message_or_callback.answer("❌ Обход не найден", show_alert=True)
+            else:
+                await message_or_callback.answer("❌ Обход не найден")
+            return
+        
+        total_checkpoints = len(patrol.checkpoints)
+        started_at = patrol.started_at
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Добавить точку обхода", callback_data="patrol_add_checkpoint")],
+        [
+            InlineKeyboardButton(text="📊 Статистика", callback_data="patrol_stats"),
+            InlineKeyboardButton(text="🔄 Обновить", callback_data="patrol_refresh_menu")
+        ],
+        [InlineKeyboardButton(text="✅ Завершить обход", callback_data="patrol_finish")],
+        [InlineKeyboardButton(text="◀️ Вернуться в меню", callback_data="patrol_cancel")]
+    ])
+    
+    text = (
+        f"🚶 <b>Обход в процессе</b>\n\n"
+        f"📅 Начат: {started_at.strftime('%d.%m.%Y %H:%M')}\n"
+        f"✅ Точек пройдено: {total_checkpoints}\n"
+        f"➡️ Следующая точка: №{checkpoint_number}\n\n"
+        f"Выберите действие:\n\n"
+        f"💡 <i>Совет: используйте /patrol_menu для быстрого возврата в это меню</i>"
+    )
+    
+    # Универсальная отправка сообщения
+    if isinstance(message_or_callback, types.CallbackQuery):
+        # Если это callback - пытаемся отредактировать, если не получается - отправляем новое
+        try:
+            await message_or_callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+        except Exception as e:
+            # Telegram не позволяет редактировать, отправляем новое сообщение
+            await message_or_callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+    else:
+        # Если это обычное сообщение - просто отправляем
+        await message_or_callback.answer(text, reply_markup=keyboard, parse_mode="HTML")
+
+
+@router.callback_query(F.data == "patrol_add_checkpoint")
+async def add_checkpoint(callback: types.CallbackQuery, state: FSMContext):
+    """Начать добавление точки обхода"""
+    data = await state.get_data()
+    checkpoint_number = data.get('checkpoint_number', 1)
+    patrol_event_id = data.get('patrol_event_id')
+    
+    # Создаем новую точку обхода в БД
+    async with get_session() as session:
+        new_checkpoint = PatrolCheckpoint(
+            event_id=patrol_event_id,
+            checkpoint_number=checkpoint_number,
+            timestamp=datetime.datetime.utcnow()
+        )
+        session.add(new_checkpoint)
+        await session.commit()
+        await session.refresh(new_checkpoint)
+        
+        # Сохраняем ID точки в состоянии с инициализацией всех флагов
+        await state.update_data(
+            current_checkpoint_id=new_checkpoint.id,
+            checkpoint_photos_count=0,
+            checkpoint_has_location=False,
+            checkpoint_has_note=False
+        )
+    
+    await state.set_state(PatrolStates.waiting_checkpoint_action)
+    await callback.answer()
+    await show_checkpoint_menu(callback.message, state)
+
+
+async def show_checkpoint_menu(message: types.Message, state: FSMContext):
+    """Показать меню действий на точке обхода"""
+    data = await state.get_data()
+    checkpoint_number = data.get('checkpoint_number', 1)
+    photos_count = data.get('checkpoint_photos_count', 0)
+    has_location = data.get('checkpoint_has_location', False)
+    has_note = data.get('checkpoint_has_note', False)
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text=f"📸 Фото ({photos_count})", callback_data="checkpoint_add_photo"),
+            InlineKeyboardButton(text="📍 Геолокация" if not has_location else "✅ Геолокация", callback_data="checkpoint_add_location")
+        ],
+        [
+            InlineKeyboardButton(text="📝 Заметка" if not has_note else "✅ Заметка", callback_data="checkpoint_add_note"),
+        ],
+        [InlineKeyboardButton(text="✅ Завершить точку", callback_data="checkpoint_finish")],
+        [InlineKeyboardButton(text="◀️ Назад в обход", callback_data="checkpoint_back_to_patrol")],
+        [InlineKeyboardButton(text="❌ Отменить точку", callback_data="checkpoint_cancel")]
+    ])
+    
+    location_icon = "✅" if has_location else "⏹️"
+    note_icon = "✅" if has_note else "⏹️"
+    
+    text = (
+        f"📍 <b>Точка обхода №{checkpoint_number}</b>\n\n"
+        f"📸 Фотографий: {photos_count}\n"
+        f"{location_icon} Геолокация\n"
+        f"{note_icon} Заметка\n\n"
+        f"Добавьте данные и завершите точку."
+    )
+    
+    # Всегда отправляем новое сообщение (не редактируем)
+    await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+
+
+@router.callback_query(F.data == "checkpoint_add_photo")
+async def request_photo(callback: types.CallbackQuery, state: FSMContext):
+    """Запросить загрузку фото"""
+    await state.set_state(PatrolStates.waiting_photo)
+    
+    await callback.message.answer(
+        "📸 <b>Загрузите фото точки обхода</b>\n\n"
+        "Отправьте фотографию (можно несколько).\n"
+        "Когда закончите, используйте меню обхода.",
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.message(PatrolStates.waiting_photo, F.photo)
+async def handle_photo(message: types.Message, state: FSMContext):
+    """Обработать полученное фото"""
+    data = await state.get_data()
+    current_checkpoint_id = data.get('current_checkpoint_id')
+    
+    if not current_checkpoint_id:
+        await message.answer("❌ Ошибка: точка обхода не найдена")
+        return
+    
+    # Сохраняем фото - используем объект PhotoSize
+    photo = message.photo[-1]  # Берем самое большое фото
+    
+    try:
+        file_path = await save_file(message.bot, photo, "patrol")
+    except Exception as e:
+        logger.error(f"Error saving photo: {e}")
+        await message.answer("❌ Ошибка при сохранении фото")
+        return
+    
+    # Добавляем фото в БД
+    async with get_session() as session:
+        new_photo = CheckpointPhoto(
+            checkpoint_id=current_checkpoint_id,
+            photo_path=file_path,
+            uploaded_at=datetime.datetime.utcnow()
+        )
+        session.add(new_photo)
+        await session.commit()
+    
+    # Обновляем счетчик фото
+    photos_count = data.get('checkpoint_photos_count', 0) + 1
+    await state.update_data(checkpoint_photos_count=photos_count)
+    
+    await message.answer(
+        f"✅ Фото добавлено! (Всего: {photos_count})\n\n"
+        f"Можете добавить ещё фото или вернуться в меню обхода.",
+        parse_mode="HTML"
+    )
+
+
+@router.message(PatrolStates.waiting_photo, F.text)
+async def handle_photo_text(message: types.Message, state: FSMContext):
+    """Обработка текста во время ожидания фото - возврат в меню"""
+    if message.text in ["❌ Отмена", "/cancel", "Отмена", "отмена"]:
+        await state.set_state(PatrolStates.waiting_checkpoint_action)
+        await show_checkpoint_menu(message, state)
+    else:
+        await message.answer(
+            "📸 Отправьте фотографию или используйте кнопки меню обхода.",
+            parse_mode="HTML"
+        )
+
+
+@router.callback_query(F.data == "checkpoint_add_location")
+async def request_location(callback: types.CallbackQuery, state: FSMContext):
+    """Запросить геолокацию"""
+    await state.set_state(PatrolStates.waiting_location)
+    
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📍 Отправить геолокацию", request_location=True)],
+            [KeyboardButton(text="❌ Отмена")]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+    
+    await callback.message.answer(
+        "📍 <b>Отправьте вашу геолокацию</b>\n\n"
+        "Нажмите кнопку ниже для отправки координат.",
+        reply_markup=keyboard,
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.message(PatrolStates.waiting_location, F.location)
+async def handle_location(message: types.Message, state: FSMContext):
+    """Обработать полученную геолокацию"""
+    data = await state.get_data()
+    current_checkpoint_id = data.get('current_checkpoint_id')
+    
+    if not current_checkpoint_id:
+        await message.answer("❌ Ошибка: точка обхода не найдена")
+        return
+    
+    # Сохраняем координаты
+    async with get_session() as session:
+        result = await session.execute(
+            select(PatrolCheckpoint)
+            .where(PatrolCheckpoint.id == current_checkpoint_id)
+        )
+        checkpoint = result.scalar_one_or_none()
+        
+        if checkpoint:
+            checkpoint.latitude = message.location.latitude
+            checkpoint.longitude = message.location.longitude
+            await session.commit()
+    
+    await state.update_data(checkpoint_has_location=True)
+    await state.set_state(PatrolStates.waiting_checkpoint_action)
+    
+    await message.answer(
+        f"✅ Геолокация добавлена!\n"
+        f"📍 {message.location.latitude:.6f}, {message.location.longitude:.6f}",
+        reply_markup=ReplyKeyboardRemove()
+    )
+    await show_checkpoint_menu(message, state)
+
+
+@router.message(PatrolStates.waiting_location, F.text)
+async def reject_non_location(message: types.Message):
+    """Отклонить не-геолокацию"""
+    if message.text == "❌ Отмена":
+        await message.answer(
+            "❌ Отменено",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return
+    
+    await message.answer(
+        "❌ <b>Отправьте геолокацию!</b>\n\n"
+        "Используйте кнопку '📍 Отправить геолокацию'.",
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data == "checkpoint_add_note")
+async def request_note(callback: types.CallbackQuery, state: FSMContext):
+    """Запросить заметку"""
+    await state.set_state(PatrolStates.waiting_notes)
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="checkpoint_cancel_note")]
+    ])
+    
+    await callback.message.edit_text(
+        "📝 <b>Введите заметку для этой точки</b>\n\n"
+        "Можете указать любую важную информацию об объекте:",
+        reply_markup=keyboard,
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.message(PatrolStates.waiting_notes, F.text)
+async def handle_note(message: types.Message, state: FSMContext):
+    """Обработать заметку"""
+    data = await state.get_data()
+    current_checkpoint_id = data.get('current_checkpoint_id')
+    
+    if not current_checkpoint_id:
+        await message.answer("❌ Ошибка: точка обхода не найдена")
+        return
+    
+    # Сохраняем заметку
+    async with get_session() as session:
+        result = await session.execute(
+            select(PatrolCheckpoint)
+            .where(PatrolCheckpoint.id == current_checkpoint_id)
+        )
+        checkpoint = result.scalar_one_or_none()
+        
+        if checkpoint:
+            checkpoint.notes = message.text
+            await session.commit()
+    
+    # Обновляем флаг наличия заметки
+    await state.update_data(checkpoint_has_note=True)
+    await state.set_state(PatrolStates.waiting_checkpoint_action)
+    
+    await message.answer("✅ Заметка добавлена!")
+    await show_checkpoint_menu(message, state)
+
+
+@router.callback_query(F.data == "checkpoint_cancel_note")
+async def cancel_note(callback: types.CallbackQuery, state: FSMContext):
+    """Отменить добавление заметки"""
+    await state.set_state(PatrolStates.waiting_checkpoint_action)
+    await callback.answer("Отменено")
+    await show_checkpoint_menu(callback.message, state)
+
+
+@router.callback_query(F.data == "checkpoint_finish")
+async def finish_checkpoint(callback: types.CallbackQuery, state: FSMContext):
+    """Завершить текущую точку обхода"""
+    data = await state.get_data()
+    photos_count = data.get('checkpoint_photos_count', 0)
+    has_location = data.get('checkpoint_has_location', False)
+    
+    # Проверяем, что добавлено хотя бы фото или геолокация
+    if photos_count == 0 and not has_location:
+        await callback.answer(
+            "⚠️ Добавьте хотя бы фото или геолокацию!",
+            show_alert=True
+        )
+        return
+    
+    # Увеличиваем номер следующей точки
+    checkpoint_number = data.get('checkpoint_number', 1)
+    await state.update_data(
+        checkpoint_number=checkpoint_number + 1,
+        current_checkpoint_id=None,
+        checkpoint_photos_count=0,
+        checkpoint_has_location=False
+    )
+    await state.set_state(PatrolStates.in_patrol)
+    
+    await callback.answer("✅ Точка завершена!")
+    await show_patrol_menu(callback.message, state)
+
+
+@router.callback_query(F.data == "checkpoint_cancel")
+async def cancel_checkpoint(callback: types.CallbackQuery, state: FSMContext):
+    """Отменить текущую точку обхода"""
+    data = await state.get_data()
+    current_checkpoint_id = data.get('current_checkpoint_id')
+    
+    # Удаляем незавершенную точку из БД
+    if current_checkpoint_id:
+        async with get_session() as session:
+            result = await session.execute(
+                select(PatrolCheckpoint)
+                .where(PatrolCheckpoint.id == current_checkpoint_id)
+            )
+            checkpoint = result.scalar_one_or_none()
+            if checkpoint:
+                await session.delete(checkpoint)
+                await session.commit()
+    
+    await state.update_data(
+        current_checkpoint_id=None,
+        checkpoint_photos_count=0,
+        checkpoint_has_location=False
+    )
+    await state.set_state(PatrolStates.in_patrol)
+    
+    await callback.answer("❌ Точка отменена")
+    await show_patrol_menu(callback.message, state)
+
+
+@router.callback_query(F.data == "checkpoint_back_to_patrol")
+async def checkpoint_back_to_patrol(callback: types.CallbackQuery, state: FSMContext):
+    """Вернуться в меню обхода, сохранив точку"""
+    data = await state.get_data()
+    current_checkpoint_id = data.get('current_checkpoint_id')
+    
+    if current_checkpoint_id:
+        # Точка уже создана, просто сохраняем текущий прогресс
+        await state.set_state(PatrolStates.in_patrol)
+        await callback.answer("💾 Прогресс точки сохранён")
+        await show_patrol_menu(callback.message, state)
+    else:
+        await callback.answer("⚠️ Нет активной точки", show_alert=True)
+
+
+@router.callback_query(F.data == "patrol_stats")
+async def show_patrol_stats(callback: types.CallbackQuery, state: FSMContext):
+    """Показать статистику обхода или общую статистику"""
+    telegram_id = callback.from_user.id
+    has_access, user = await check_user_access(telegram_id, [Role.GUARD.value, Role.ADMIN.value])
+    
+    if not has_access:
+        await callback.answer("❌ Нет прав", show_alert=True)
+        return
+    
+    data = await state.get_data()
+    patrol_event_id = data.get('patrol_event_id')
+    
+    async with get_session() as session:
+        # Если есть текущий обход - показываем его статистику
+        if patrol_event_id:
+            result = await session.execute(
+                select(PatrolEvent)
+                .options(
+                    selectinload(PatrolEvent.checkpoints).selectinload(PatrolCheckpoint.photos)
+                )
+                .where(PatrolEvent.id == patrol_event_id)
+            )
+            patrol = result.scalar_one_or_none()
+            
+            if patrol:
+                # Статистика текущего обхода
+                total_checkpoints = len(patrol.checkpoints)
+                total_photos = sum(len(cp.photos) for cp in patrol.checkpoints)
+                checkpoints_with_location = sum(1 for cp in patrol.checkpoints if cp.latitude is not None)
+                
+                duration = datetime.datetime.utcnow() - patrol.started_at
+                hours, remainder = divmod(int(duration.total_seconds()), 3600)
+                minutes, seconds = divmod(remainder, 60)
+                
+                text = (
+                    f"📊 <b>Статистика текущего обхода</b>\n\n"
+                    f"⏱ Длительность: {hours}ч {minutes}м {seconds}с\n"
+                    f"📍 Точек обхода: {total_checkpoints}\n"
+                    f"📸 Всего фотографий: {total_photos}\n"
+                    f"🗺 С геолокацией: {checkpoints_with_location}\n\n"
+                )
+                
+                # Детали по точкам
+                if total_checkpoints > 0:
+                    text += "Детали по точкам:\n"
+                    for cp in patrol.checkpoints:
+                        photos = len(cp.photos)
+                        loc = "�" if cp.latitude else "⬜️"
+                        note = "📝" if cp.notes else ""
+                        text += f"  • Точка №{cp.checkpoint_number}: {photos} фото {loc} {note}\n"
+                
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="◀️ Назад", callback_data="patrol_back_to_menu")]
+                ])
+                
+                await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+                await callback.answer()
+                return
+        
+        # Если нет текущего обхода - показываем общую статистику
+        # Считаем завершённые обходы (новая система)
+        completed_result = await session.execute(
+            select(func.count(PatrolEvent.id))
+            .where(
+                PatrolEvent.guard_id == user.id,
+                PatrolEvent.status == 'completed'
+            )
+        )
+        completed_patrols = completed_result.scalar_one()
+        
+        # Считаем данные из завершённых обходов
+        patrols_result = await session.execute(
+            select(PatrolEvent)
+            .options(selectinload(PatrolEvent.checkpoints).selectinload(PatrolCheckpoint.photos))
+            .where(
+                PatrolEvent.guard_id == user.id,
+                PatrolEvent.status == 'completed'
+            )
+        )
+        all_patrols = patrols_result.scalars().all()
+        
+        total_checkpoints = sum(len(p.checkpoints) for p in all_patrols)
+        total_photos = sum(sum(len(cp.photos) for cp in p.checkpoints) for p in all_patrols)
+        total_with_location = sum(sum(1 for cp in p.checkpoints if cp.has_location) for p in all_patrols)
+        
+        # Считаем старые записи из legacy таблицы Patrol
+        from database.models import Patrol
+        legacy_result = await session.execute(
+            select(func.count(Patrol.id))
+        )
+        legacy_count = legacy_result.scalar_one()
+        
+        text = (
+            f"📊 <b>Общая статистика обходов</b>\n\n"
+            f"✅ Завершённых обходов: {completed_patrols}\n"
+            f"📍 Всего точек: {total_checkpoints}\n"
+            f"📸 Фотографий: {total_photos}\n"
+            f"🗺 С геолокацией: {total_with_location}\n\n"
+        )
+        
+        if legacy_count > 0:
+            text += f"📦 Старых записей (legacy): {legacy_count}\n\n"
+        
+        if completed_patrols == 0:
+            text += "У вас пока нет завершённых обходов.\n"
+            text += "Начните новый обход!"
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📂 Архив обходов", callback_data="patrol_archive")],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="menu_patrol_management")]
+        ])
+        
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+        await callback.answer()
+
+
+@router.callback_query(F.data == "patrol_back_to_menu")
+async def back_to_patrol_menu(callback: types.CallbackQuery, state: FSMContext):
+    """Вернуться в меню обхода"""
+    await show_patrol_menu(callback, state)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "patrol_refresh_menu")
+async def refresh_patrol_menu(callback: types.CallbackQuery, state: FSMContext):
+    """Обновить меню обхода (принудительное обновление)"""
+    await show_patrol_menu(callback, state)
+    await callback.answer("🔄 Обновлено")
+
+
+@router.callback_query(F.data == "patrol_finish")
+async def finish_patrol(callback: types.CallbackQuery, state: FSMContext):
+    """Завершить обход"""
+    data = await state.get_data()
+    patrol_event_id = data.get('patrol_event_id')
+    
+    async with get_session() as session:
+        result = await session.execute(
+            select(PatrolEvent)
+            .options(
+                selectinload(PatrolEvent.checkpoints).selectinload(PatrolCheckpoint.photos)
+            )
+            .where(PatrolEvent.id == patrol_event_id)
+        )
+        patrol = result.scalar_one_or_none()
+        
+        if not patrol:
+            await callback.answer("❌ Обход не найден", show_alert=True)
+            return
+        
+        # Проверяем, что есть хотя бы одна точка
+        if len(patrol.checkpoints) == 0:
+            await callback.answer(
+                "⚠️ Добавьте хотя бы одну точку обхода!",
+                show_alert=True
+            )
+            return
+        
+        # Завершаем обход
+        patrol.status = 'completed'
+        patrol.completed_at = datetime.datetime.utcnow()
+        await session.commit()
+        
+        # Статистика
+        total_checkpoints = len(patrol.checkpoints)
+        total_photos = sum(len(cp.photos) for cp in patrol.checkpoints)
+        duration = patrol.completed_at - patrol.started_at
+        hours, remainder = divmod(int(duration.total_seconds()), 3600)
+        minutes, _ = divmod(remainder, 60)
+    
+    await state.clear()
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+    ])
+    
+    await callback.message.edit_text(
+        f"✅ <b>Обход завершен!</b>\n\n"
+        f"⏱ Длительность: {hours}ч {minutes}м\n"
+        f"📍 Точек пройдено: {total_checkpoints}\n"
+        f"📸 Фотографий: {total_photos}\n\n"
+        f"Спасибо за работу!",
+        reply_markup=keyboard,
+        parse_mode="HTML"
+    )
+    await callback.answer("✅ Обход завершен!")
+
+
+@router.callback_query(F.data == "patrol_cancel")
+async def cancel_patrol(callback: types.CallbackQuery, state: FSMContext):
+    """Отменить обход (вернуться в главное меню без завершения)"""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Да, выйти без завершения", callback_data="patrol_cancel_confirm")],
+        [InlineKeyboardButton(text="❌ Нет, продолжить обход", callback_data="patrol_back_to_menu")]
+    ])
+    
+    await callback.message.edit_text(
+        "⚠️ <b>Вы уверены?</b>\n\n"
+        "Обход останется активным, вы сможете продолжить его позже.\n"
+        "Или завершите обход, чтобы сохранить результаты.",
+        reply_markup=keyboard,
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "patrol_cancel_confirm")
+async def cancel_patrol_confirm(callback: types.CallbackQuery, state: FSMContext):
+    """Подтвердить выход из обхода"""
+    await state.clear()
+    
+    # Возвращаемся в главное меню
+    from handlers.menu import show_main_menu
+    from utils.user_helpers import get_user_info
+    
+    telegram_id = callback.from_user.id
+    role, name = await get_user_info(telegram_id)
+    
+    await show_main_menu(callback, role, name)
+    await callback.answer("Обход остался активным")
+
+
+# ============================================================================
+# АРХИВ ЗАВЕРШЁННЫХ ОБХОДОВ
+# ============================================================================
+
+PATROLS_PER_PAGE = 10
+
+
+@router.callback_query(F.data == "patrol_archive")
+async def show_patrol_archive(callback: types.CallbackQuery, state: FSMContext, page: int = 1):
+    """Показать архив завершённых обходов с пагинацией"""
+    telegram_id = callback.from_user.id
+    has_access, user = await check_user_access(telegram_id, [Role.GUARD.value, Role.ADMIN.value])
+    
+    if not has_access:
+        await callback.answer("❌ Нет прав", show_alert=True)
+        return
+    
+    async with get_session() as session:
+        # Подсчитываем общее количество завершённых обходов
+        count_result = await session.execute(
+            select(func.count(PatrolEvent.id))
+            .where(
+                PatrolEvent.guard_id == user.id,
+                PatrolEvent.status == 'completed'
+            )
+        )
+        total_patrols = count_result.scalar_one()
+        
+        if total_patrols == 0:
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="menu_patrol_management")]
+            ])
+            await callback.message.edit_text(
+                "📂 <b>Архив завершённых обходов</b>\n\n"
+                "У вас пока нет завершённых обходов.",
+                reply_markup=keyboard,
+                parse_mode="HTML"
+            )
+            await callback.answer()
+            return
+        
+        # Рассчитываем пагинацию
+        total_pages = (total_patrols + PATROLS_PER_PAGE - 1) // PATROLS_PER_PAGE
+        page = max(1, min(page, total_pages))
+        offset = (page - 1) * PATROLS_PER_PAGE
+        
+        # Получаем обходы для текущей страницы
+        result = await session.execute(
+            select(PatrolEvent)
+            .options(
+                selectinload(PatrolEvent.checkpoints).selectinload(PatrolCheckpoint.photos)
+            )
+            .where(
+                PatrolEvent.guard_id == user.id,
+                PatrolEvent.status == 'completed'
+            )
+            .order_by(PatrolEvent.completed_at.desc())
+            .limit(PATROLS_PER_PAGE)
+            .offset(offset)
+        )
+        patrols = result.scalars().all()
+        
+        # Формируем текст
+        text = f"📂 <b>Архив завершённых обходов</b>\n\n"
+        text += f"Страница {page} из {total_pages}\n\n"
+        
+        for patrol in patrols:
+            started = patrol.started_at.strftime('%d.%m.%Y %H:%M')
+            completed = patrol.completed_at.strftime('%d.%m.%Y %H:%M') if patrol.completed_at else "—"
+            
+            # Подсчитываем данные
+            checkpoints = len(patrol.checkpoints)
+            photos = sum(len(cp.photos) for cp in patrol.checkpoints)
+            
+            # Длительность
+            if patrol.completed_at:
+                duration = patrol.completed_at - patrol.started_at
+                hours, remainder = divmod(int(duration.total_seconds()), 3600)
+                minutes, _ = divmod(remainder, 60)
+                duration_str = f"{hours}ч {minutes}м"
+            else:
+                duration_str = "—"
+            
+            text += (
+                f"🔹 <b>Обход #{patrol.id}</b>\n"
+                f"  📅 {started} - {completed}\n"
+                f"  ⏱ Длительность: {duration_str}\n"
+                f"  📍 Точек: {checkpoints} | 📸 Фото: {photos}\n"
+                f"  /patrol_details_{patrol.id}\n\n"
+            )
+        
+        # Кнопки навигации
+        buttons = []
+        nav_buttons = []
+        
+        if page > 1:
+            nav_buttons.append(InlineKeyboardButton(
+                text="◀️ Назад", 
+                callback_data=f"patrol_archive_page_{page - 1}"
+            ))
+        
+        if page < total_pages:
+            nav_buttons.append(InlineKeyboardButton(
+                text="Вперёд ▶️", 
+                callback_data=f"patrol_archive_page_{page + 1}"
+            ))
+        
+        if nav_buttons:
+            buttons.append(nav_buttons)
+        
+        buttons.append([InlineKeyboardButton(text="🏠 В меню обходов", callback_data="menu_patrol_management")])
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+        
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+        await callback.answer()
+
+
+@router.callback_query(F.data.startswith("patrol_archive_page_"))
+async def patrol_archive_pagination(callback: types.CallbackQuery, state: FSMContext):
+    """Обработка навигации по страницам архива"""
+    page = int(callback.data.split("_")[-1])
+    await show_patrol_archive(callback, state, page)
+
+
+@router.message(Command(commands=["patrol_details"]))
+async def patrol_details_command(message: types.Message, state: FSMContext):
+    """Показать детали обхода по команде /patrol_details_ID"""
+    try:
+        patrol_id = int(message.text.split("_")[-1])
+    except (ValueError, IndexError):
+        await message.answer("❌ Неверный формат команды")
+        return
+    
+    await show_patrol_details(message, state, patrol_id)
+
+
+async def show_patrol_details(message_or_callback, state: FSMContext, patrol_id: int):
+    """Показать подробную информацию об обходе"""
+    # Определяем тип объекта
+    if isinstance(message_or_callback, types.CallbackQuery):
+        telegram_id = message_or_callback.from_user.id
+        message = message_or_callback.message
+    else:
+        telegram_id = message_or_callback.from_user.id
+        message = message_or_callback
+    
+    has_access, user = await check_user_access(telegram_id, [Role.GUARD.value, Role.ADMIN.value])
+    
+    if not has_access:
+        await message.answer("❌ Нет прав")
+        return
+    
+    async with get_session() as session:
+        result = await session.execute(
+            select(PatrolEvent)
+            .options(
+                selectinload(PatrolEvent.checkpoints).selectinload(PatrolCheckpoint.photos)
+            )
+            .where(PatrolEvent.id == patrol_id)
+        )
+        patrol = result.scalar_one_or_none()
+        
+        if not patrol:
+            await message.answer("❌ Обход не найден")
+            return
+        
+        # Проверяем доступ (только свои обходы, кроме админов)
+        if patrol.guard_id != user.id and user.role != Role.ADMIN.value:
+            await message.answer("❌ Нет доступа к этому обходу")
+            return
+        
+        # Формируем детальную информацию
+        started = patrol.started_at.strftime('%d.%m.%Y %H:%M:%S')
+        completed = patrol.completed_at.strftime('%d.%m.%Y %H:%M:%S') if patrol.completed_at else "В процессе"
+        
+        # Длительность
+        if patrol.completed_at:
+            duration = patrol.completed_at - patrol.started_at
+            hours, remainder = divmod(int(duration.total_seconds()), 3600)
+            minutes, seconds = divmod(remainder, 60)
+            duration_str = f"{hours}ч {minutes}м {seconds}с"
+        else:
+            duration = datetime.datetime.utcnow() - patrol.started_at
+            hours, remainder = divmod(int(duration.total_seconds()), 3600)
+            minutes, seconds = divmod(remainder, 60)
+            duration_str = f"{hours}ч {minutes}м {seconds}с (в процессе)"
+        
+        # Статистика
+        checkpoints = len(patrol.checkpoints)
+        total_photos = sum(len(cp.photos) for cp in patrol.checkpoints)
+        with_location = sum(1 for cp in patrol.checkpoints if cp.has_location)
+        with_notes = sum(1 for cp in patrol.checkpoints if cp.notes)
+        
+        text = (
+            f"🔍 <b>Детали обхода #{patrol.id}</b>\n\n"
+            f"📅 Начало: {started}\n"
+            f"🏁 Завершение: {completed}\n"
+            f"⏱ Длительность: {duration_str}\n"
+            f"📊 Статус: {patrol.status}\n\n"
+            f"<b>Статистика:</b>\n"
+            f"📍 Всего точек: {checkpoints}\n"
+            f"📸 Фотографий: {total_photos}\n"
+            f"🗺 С геолокацией: {with_location}\n"
+            f"📝 С заметками: {with_notes}\n\n"
+        )
+        
+        if patrol.notes:
+            text += f"<b>Заметки:</b>\n{patrol.notes}\n\n"
+        
+        # Детали по точкам
+        if checkpoints > 0:
+            text += "<b>Точки обхода:</b>\n"
+            for cp in patrol.checkpoints:
+                time = cp.timestamp.strftime('%H:%M:%S')
+                photos_count = len(cp.photos)
+                loc_icon = "🗺" if cp.has_location else "⬜️"
+                note_icon = "📝" if cp.notes else ""
+                
+                text += f"  • #{cp.checkpoint_number} ({time}): {photos_count} фото {loc_icon} {note_icon}\n"
+                
+                if cp.notes:
+                    text += f"    💬 {cp.notes}\n"
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад в архив", callback_data="patrol_archive")]
+        ])
+        
+        await message.answer(text, reply_markup=keyboard, parse_mode="HTML")

@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  guardbot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: guardbot:1.0.0
+    container_name: guardbot
+    restart: unless-stopped
+    
+    env_file:
+      - .env
+    
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Europe/Moscow
+    
+    volumes:
+      # Persist database
+      - ./guardbot.db:/app/guardbot.db
+      
+      # Persist uploaded media
+      - ./data/media:/app/data/media
+      
+      # Persist exports
+      - ./data/export:/app/data/export
+      
+      # Logs (optional, for debugging)
+      - ./logs:/app/logs
+    
+    # Resource limits (adjust based on your needs)
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; os.path.exists('.bot.lock') or exit(1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    
+    # Network mode (optional, if you need specific networking)
+    # network_mode: "host"
+
+# Optional: Add a separate service for database backups
+# services:
+#   backup:
+#     image: alpine:latest
+#     volumes:
+#       - ./guardbot.db:/data/guardbot.db:ro
+#       - ./backups:/backups
+#     command: >
+#       sh -c "while true; do
+#         cp /data/guardbot.db /backups/guardbot_$$(date +%Y%m%d_%H%M%S).db;
+#         find /backups -type f -mtime +7 -delete;
+#         sleep 86400;
+#       done"
