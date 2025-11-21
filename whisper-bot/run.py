@@ -5,6 +5,7 @@ This script adds the src directory to Python path and starts the bot.
 """
 
 import sys
+import asyncio
 from pathlib import Path
 
 # Add src directory to Python path
@@ -15,4 +16,4 @@ sys.path.insert(0, str(src_path))
 from main import main
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
