@@ -4,10 +4,10 @@ After=network.target
 
 [Service]
 Type=simple
-User=botuser
-WorkingDirectory=/home/botuser/bots/whisper-bot
-Environment="PATH=/home/botuser/bots/whisper-bot/venv/bin"
-ExecStart=/home/botuser/bots/whisper-bot/venv/bin/python bot.py
+User=root
+WorkingDirectory=/root/assistant/whisper-bot
+Environment="PATH=/root/assistant/whisper-bot/venv/bin"
+ExecStart=/root/assistant/whisper-bot/venv/bin/python src/main.py
 Restart=always
 RestartSec=10
 

@@ -10,8 +10,8 @@ Write-Host "====================================" -ForegroundColor Cyan
 Write-Host ""
 
 # Проверка что мы в правильной директории
-if (-not (Test-Path "bot.py")) {
-    Write-Host "❌ Ошибка: bot.py не найден!" -ForegroundColor Red
+if (-not (Test-Path "src\main.py")) {
+    Write-Host "❌ Ошибка: src\main.py не найден!" -ForegroundColor Red
     Write-Host "Запустите скрипт из директории whisper-bot" -ForegroundColor Red
     exit 1
 }
@@ -32,7 +32,7 @@ if ($changes) {
         if ($commit -eq "y") {
             git add .
             $CommitMessage = Read-Host "Введите сообщение коммита"
-            git commit -m "$CommitMessage"
+            git commit -m $CommitMessage
             Write-Host "✅ Изменения закоммичены" -ForegroundColor Green
         } else {
             Write-Host "❌ Отменено. Сначала закоммитьте изменения." -ForegroundColor Red
@@ -40,7 +40,7 @@ if ($changes) {
         }
     } else {
         git add .
-        git commit -m "$CommitMessage"
+        git commit -m $CommitMessage
         Write-Host "✅ Изменения закоммичены: $CommitMessage" -ForegroundColor Green
     }
 } else {
@@ -64,7 +64,7 @@ Write-Host "3️⃣  Подключаюсь к серверу и обновля�
 Write-Host ""
 
 $updateScript = @'
-cd /root/whisper-bot && bash update-bot.sh
+cd /root/assistant/whisper-bot && bash scripts/update-bot.sh
 '@
 
 $updateScript | ssh root@37.233.85.194 bash
