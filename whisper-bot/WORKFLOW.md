@@ -229,10 +229,7 @@ cd c:\Users\User\assistant\whisper-bot
 git init
 
 # Добавление удаленного репозитория
-git remote add origin https://github.com/otg-tech/bots.git
-
-# Или если используете SSH
-git remote add origin git@github.com:otg-tech/bots.git
+git remote add origin git@github.com:kitgriului/assistant.git
 
 # Первый коммит
 git add .
@@ -251,9 +248,9 @@ cd /root/whisper-bot
 
 # Инициализируем git
 git init
-git remote add origin https://github.com/otg-tech/bots.git
+git remote add origin git@github.com:kitgriului/assistant.git
 git fetch origin
-git checkout main
+git checkout -b main origin/main
 
 # Создаем скрипт обновления
 nano update-bot.sh
@@ -393,7 +390,7 @@ ssh root@37.233.85.194 "cd /root/whisper-bot && source venv/bin/activate && pip 
 - **Проверка бота:** `.\check-bot.bat`
 - **Обновление бота:** `.\update-bot-server.ps1`
 - **Логи на сервере:** `ssh root@37.233.85.194 "journalctl -u whisper-bot -f"`
-- **GitHub репозиторий:** https://github.com/otg-tech/bots
+- **GitHub репозиторий:** https://github.com/kitgriului/assistant
 
 ---
 

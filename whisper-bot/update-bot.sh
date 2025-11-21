@@ -21,6 +21,7 @@ fi
 
 # Обновляем код
 echo "📥 Загружаю изменения с GitHub..."
+git remote set-url origin git@github.com:kitgriului/assistant.git 2>/dev/null || true
 git fetch origin
 git reset --hard origin/main
 
