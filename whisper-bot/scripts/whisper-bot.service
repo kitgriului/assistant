@@ -7,7 +7,7 @@ Type=simple
 User=root
 WorkingDirectory=/root/whisper-bot
 Environment="PATH=/root/whisper-bot/venv/bin"
-ExecStart=/root/whisper-bot/venv/bin/python src/main.py
+ExecStart=/root/whisper-bot/venv/bin/python run.py
 Restart=always
 RestartSec=10
 

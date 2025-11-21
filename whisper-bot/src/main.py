@@ -13,9 +13,9 @@ from aiogram.filters import CommandStart
 from aiogram.types import Message, CallbackQuery, FSInputFile
 from openai import OpenAI
 
-from .config import Config
-from .utils import setup_logging, get_logger
-from .services import (
+from config import Config
+from utils import setup_logging, get_logger
+from services import (
     WhisperService,
     GPTService,
     MediaProcessor,
@@ -23,7 +23,7 @@ from .services import (
 )
 
 if CALENDAR_AVAILABLE:
-    from .services.calendar import (
+    from services.calendar import (
         extract_meeting_info,
         format_meeting_summary,
         create_ics_file,
