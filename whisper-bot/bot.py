@@ -15,21 +15,22 @@ try:
 except Exception:  # pragma: no cover - safety fallback if package missing during static checks
     OpenAI = None  # type: ignore
 
-# Импорт модулей календаря
-try:
-    from calendar_parser import extract_meeting_info, format_meeting_summary
-    from calendar_integration import create_ics_file, create_google_calendar_event, check_calendar_auth
-    CALENDAR_ENABLED = True
-except ImportError:
-    CALENDAR_ENABLED = False
-    logger.warning("Calendar modules not available")
-
-
+# Настройка логирования ПЕРВАЯ
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 logger = logging.getLogger("voice-whisper-bot")
+
+# Импорт модулей календаря
+try:
+    from calendar_parser import extract_meeting_info, format_meeting_summary
+    from calendar_integration import create_ics_file, create_google_calendar_event, check_calendar_auth
+    CALENDAR_ENABLED = True
+    logger.info("✅ Calendar modules loaded successfully")
+except ImportError as e:
+    CALENDAR_ENABLED = False
+    logger.warning(f"⚠️ Calendar modules not available: {e}")
 
 # Временное хранилище расшифрованных текстов (chat_id -> text)
 transcription_storage: dict[int, str] = {}
@@ -341,8 +342,8 @@ async def main() -> None:
                     await processing_msg.edit_text("❌ Модуль календаря недоступен")
                     return
                 
-                # Извлекаем информацию о встрече из текста
-                meeting_info = extract_meeting_info(client, text)
+                # Извлекаем информацию о встрече из текста (используем client из замыкания)
+                meeting_info = await asyncio.to_thread(extract_meeting_info, client, text)
                 
                 if not meeting_info:
                     await processing_msg.edit_text(
@@ -354,8 +355,8 @@ async def main() -> None:
                 # Форматируем информацию о встрече
                 summary = format_meeting_summary(meeting_info)
                 
-                # Создаем .ics файл
-                ics_path = create_ics_file(meeting_info)
+                # Создаем .ics файл (обернем в thread для IO операций)
+                ics_path = await asyncio.to_thread(create_ics_file, meeting_info)
                 
                 if ics_path:
                     await processing_msg.edit_text(
