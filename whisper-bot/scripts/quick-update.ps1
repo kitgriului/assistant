@@ -8,7 +8,7 @@ Write-Host ""
 
 Write-Host "📥 Обновляю код на сервере..." -ForegroundColor Yellow
 
-ssh root@37.233.85.194 bash -c `"cd /root/assistant/whisper-bot `&`& echo '🔄 Git pull...' `&`& git pull origin main `&`& echo '⏸️  Останавливаю бота...' `&`& systemctl stop whisper-bot `&`& echo '📦 Обновляю зависимости...' `&`& source venv/bin/activate `&`& pip install -r requirements.txt --quiet `&`& echo '▶️  Запускаю бота...' `&`& systemctl start whisper-bot `&`& sleep 3 `&`& if systemctl is-active --quiet whisper-bot`;` then echo '✅ Бот успешно обновлен и запущен!' `&`& systemctl status whisper-bot --no-pager -l | head -10`;` else echo '❌ Ошибка запуска бота!' `&`& journalctl -u whisper-bot -n 20 --no-pager `&`& exit 1`;` fi`"
+ssh root@37.233.85.194 "cd /root/whisper-bot && bash scripts/update-bot.sh"
 
 if ($LASTEXITCODE -eq 0) {
     Write-Host ""

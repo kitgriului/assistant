@@ -1,13 +1,13 @@
 #!/bin/bash
 # Скрипт обновления бота на сервере
-# Расположение: /root/assistant/whisper-bot/scripts/update-bot.sh
+# Расположение: /root/whisper-bot/scripts/update-bot.sh (symlink to /root/assistant/whisper-bot)
 
 set -e
 
 echo "🔄 Обновление Whisper Bot..."
 echo ""
 
-cd /root/assistant/whisper-bot
+cd /root/whisper-bot
 
 # Останавливаем бота
 echo "⏸️  Останавливаю бота..."

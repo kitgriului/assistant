@@ -64,7 +64,7 @@ Write-Host "3️⃣  Подключаюсь к серверу и обновля�
 Write-Host ""
 
 $updateScript = @'
-cd /root/assistant/whisper-bot && bash scripts/update-bot.sh
+cd /root/whisper-bot && bash scripts/update-bot.sh
 '@
 
 $updateScript | ssh root@37.233.85.194 bash
