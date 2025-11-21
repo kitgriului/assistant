@@ -29,7 +29,7 @@ if CALENDAR_AVAILABLE:
         create_ics_file,
     )
 
-from .bot import TranscriptionStorage, create_action_keyboard
+from bot import TranscriptionStorage, create_action_keyboard
 
 logger = get_logger(__name__)
 

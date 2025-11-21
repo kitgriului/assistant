@@ -8,7 +8,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
-from ..utils import get_logger
+from utils import get_logger
 
 logger = get_logger(__name__)
 
