@@ -46,3 +46,12 @@ Thumbs.db
 # Temporary files
 tmp/
 temp/
+
+# Google Calendar credentials
+credentials/
+user_tokens/
+google_credentials.json
+*_token.json
+
+# ICS files
+*.ics

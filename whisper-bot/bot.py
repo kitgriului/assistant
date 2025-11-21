@@ -7,13 +7,22 @@ from pathlib import Path
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, FSInputFile
 from dotenv import load_dotenv
 
 try:
     from openai import OpenAI
 except Exception:  # pragma: no cover - safety fallback if package missing during static checks
     OpenAI = None  # type: ignore
+
+# Импорт модулей календаря
+try:
+    from calendar_parser import extract_meeting_info, format_meeting_summary
+    from calendar_integration import create_ics_file, create_google_calendar_event, check_calendar_auth
+    CALENDAR_ENABLED = True
+except ImportError:
+    CALENDAR_ENABLED = False
+    logger.warning("Calendar modules not available")
 
 
 logging.basicConfig(
@@ -157,17 +166,17 @@ async def _create_summary_from_text(client: "OpenAI", text: str) -> str:
 
 def _create_action_keyboard() -> InlineKeyboardMarkup:
     """Создать клавиатуру с действиями после расшифровки."""
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🗒 Создать заметку", callback_data="action:note")
-        ],
-        [
-            InlineKeyboardButton(text="📅 Создать встречу", callback_data="action:meeting")
-        ],
-        [
-            InlineKeyboardButton(text="📊 Сделать саммари", callback_data="action:summary")
-        ]
-    ])
+    buttons = [
+        [InlineKeyboardButton(text="🗒 Создать заметку", callback_data="action:note")],
+        [InlineKeyboardButton(text="📅 Создать встречу", callback_data="action:meeting")],
+        [InlineKeyboardButton(text="📊 Сделать саммари", callback_data="action:summary")],
+    ]
+    
+    # Добавляем кнопку календаря если модуль доступен
+    if CALENDAR_ENABLED:
+        buttons.append([InlineKeyboardButton(text="� Создать событие в календаре", callback_data="action:calendar")])
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
     return keyboard
 
 
@@ -326,6 +335,48 @@ async def main() -> None:
             elif action == "summary":
                 result = await _create_summary_from_text(client, text)
                 await processing_msg.edit_text(f"📊 **Саммари:**\n\n{result}", parse_mode="Markdown")
+            
+            elif action == "calendar":
+                if not CALENDAR_ENABLED:
+                    await processing_msg.edit_text("❌ Модуль календаря недоступен")
+                    return
+                
+                # Извлекаем информацию о встрече из текста
+                meeting_info = extract_meeting_info(client, text)
+                
+                if not meeting_info:
+                    await processing_msg.edit_text(
+                        "❌ Не удалось найти информацию о встрече в тексте.\n\n"
+                        "Убедитесь что в сообщении указаны дата и время встречи."
+                    )
+                    return
+                
+                # Форматируем информацию о встрече
+                summary = format_meeting_summary(meeting_info)
+                
+                # Создаем .ics файл
+                ics_path = create_ics_file(meeting_info)
+                
+                if ics_path:
+                    await processing_msg.edit_text(
+                        f"✅ Событие создано!\n\n{summary}\n\n"
+                        "📎 Отправляю файл для добавления в календарь..."
+                    )
+                    
+                    # Отправляем .ics файл
+                    ics_file = FSInputFile(ics_path)
+                    await callback.message.answer_document(
+                        document=ics_file,
+                        caption="📆 Откройте этот файл чтобы добавить событие в ваш календарь"
+                    )
+                    
+                    # Удаляем временный файл
+                    try:
+                        os.unlink(ics_path)
+                    except:
+                        pass
+                else:
+                    await processing_msg.edit_text("❌ Ошибка при создании файла календаря")
             
             else:
                 await processing_msg.edit_text("❌ Неизвестное действие")
