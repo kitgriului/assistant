@@ -1,4 +1,11 @@
-# PowerShell скрипт для автоматического обновления бота на сервере
+# Быстрый деплой (самый простой)
+.\scripts\quick-update.ps1
+
+# ИЛИ с автоматическим коммитом
+.\scripts\update-bot-server.ps1
+
+# ИЛИ вручную
+ssh root@37.233.85.194 "cd /root/whisper-bot && git pull && systemctl restart whisper-bot"# PowerShell скрипт для автоматического обновления бота на сервере
 
 param(
     [string]$CommitMessage = ""
