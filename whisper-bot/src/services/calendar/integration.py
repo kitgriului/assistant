@@ -3,6 +3,7 @@
 """
 
 import os
+import logging
 from datetime import datetime
 from typing import Optional, Dict, Any
 from pathlib import Path
@@ -15,6 +16,7 @@ from googleapiclient.discovery import build
 
 from .parser import parse_datetime, calculate_end_time
 
+logger = logging.getLogger(__name__)
 
 # Области доступа для Google Calendar API
 SCOPES = ['https://www.googleapis.com/auth/calendar']
@@ -126,7 +128,7 @@ def create_ics_file(meeting_info: Dict[str, Any], output_dir: str = "/tmp") -> O
         return str(filepath)
         
     except Exception as e:
-        print(f"Ошибка при создании .ics файла: {e}")
+        logger.exception(f"Ошибка при создании .ics файла: {e}")
         return None
 
 
