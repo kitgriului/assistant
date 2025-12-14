@@ -2,21 +2,43 @@
 
 Telegram-бот для расшифровки голосовых сообщений, аудио и видео с помощью OpenAI Whisper API.
 
+**Версия:** 2.0 (модульная архитектура)  
+**Репозиторий:** [kitgriului/assistant](https://github.com/kitgriului/assistant)
+
 ## ✨ Возможности
 
 - 🔊 Расшифровка голосовых сообщений Telegram
 - 🎵 Поддержка аудиофайлов (MP3, M4A, WAV, OGG и др.)
 - 🎬 Извлечение и расшифровка аудио из видео
+- 🤖 AI-обработка текста через GPT-4
 - 🗒 Создание структурированных заметок из расшифровки
-- 📅 Извлечение информации о встречах
+- 📅 Извлечение информации о встречах и создание ICS файлов
 - 📊 Генерация кратких саммари
+- 🔄 Git-based deployment workflow
 
-## 🚀 Установка
+## 🏗️ Архитектура
+
+```
+whisper-bot/
+├── run.py              # Точка входа
+├── src/
+│   ├── main.py         # Основная логика бота
+│   ├── config.py       # Конфигурация
+│   ├── bot/            # Компоненты Telegram бота
+│   ├── services/       # Сервисы (Whisper, GPT, Media, Calendar)
+│   └── utils/          # Утилиты (логирование)
+├── scripts/            # Скрипты деплоя
+├── docs/               # Документация
+└── tests/              # Тесты
+```
+
+## 🚀 Быстрый старт
 
 ### Требования
 
 - Python 3.10+
 - ffmpeg (для конвертации аудио/видео)
+- Git
 
 ### Установка зависимостей
 
@@ -58,24 +80,40 @@ OPENAI_API_KEY=your_openai_api_key_here
    - **BOT_TOKEN**: создайте бота через [@BotFather](https://t.me/botfather) в Telegram
    - **OPENAI_API_KEY**: получите на [platform.openai.com](https://platform.openai.com/api-keys)
 
-## 🎯 Запуск
-
-### Локальный запуск
+### Локальная разработка
 
 ```bash
-python bot.py
+# 1. Клонируйте репозиторий
+git clone https://github.com/kitgriului/assistant.git
+cd assistant/whisper-bot
+
+# 2. Создайте виртуальное окружение
+python -m venv .venv
+source .venv/bin/activate  # Linux/Mac
+# или
+.venv\Scripts\Activate.ps1  # Windows
+
+# 3. Установите зависимости
+pip install -r requirements.txt
+
+# 4. Создайте .env файл
+cp .env.example .env
+# Отредактируйте .env и добавьте свои токены
+
+# 5. Запустите бота
+python run.py
 ```
 
 ### Деплой на сервер
 
-Для развертывания бота на сервере и обеспечения его работы 24/7, смотрите подробную инструкцию в [DEPLOYMENT.md](DEPLOYMENT.md).
+См. документацию:
+- [📘 QUICK-DEPLOY.md](docs/QUICK-DEPLOY.md) - Быстрая шпаргалка
+- [📗 DEPLOY-FROM-GIT.md](docs/DEPLOY-FROM-GIT.md) - Подробная инструкция
+- [📕 DEPLOYMENT.md](docs/DEPLOYMENT.md) - Полное руководство
 
-**Быстрый старт с Docker:**
-
-```bash
-# Создайте .env файл с токенами
-# Затем запустите:
-docker-compose up -d
+**Быстрый деплой:**
+```powershell
+.\scripts\quick-update.ps1
 ```
 
 ## 📖 Использование
@@ -85,13 +123,52 @@ docker-compose up -d
 3. Дождитесь расшифровки
 4. Выберите одно из действий:
    - 🗒 **Создать заметку** - структурированная заметка в Markdown
-   - 📅 **Создать встречу** - извлечение информации о встрече
+   - 📅 **Создать встречу** - извлечение информации о встрече + ICS файл
    - 📊 **Сделать саммари** - краткое содержание
 
-## ⚠️ Ограничения
+## 🛠️ Разработка
 
+### Workflow
+
+```bash
+# 1. Внесите изменения в код
+# 2. Протестируйте локально
+python run.py
+
+# 3. Закоммитьте и запушьте
+git add .
+git commit -m "Описание изменений"
+git push origin main
+
+# 4. Задеплойте на сервер
+.\scripts\quick-update.ps1
+```
+
+См. [WORKFLOW.md](docs/WORKFLOW.md) для деталей.
+
+## 📚 Документация
+
+- [📘 QUICK-DEPLOY.md](docs/QUICK-DEPLOY.md) - Шпаргалка по деплою
+- [📗 DEPLOY-FROM-GIT.md](docs/DEPLOY-FROM-GIT.md) - Git-based deployment
+- [📕 DEPLOYMENT.md](docs/DEPLOYMENT.md) - Полное руководство по деплою
+- [📙 CALENDAR_SETUP.md](docs/CALENDAR_SETUP.md) - Настройка Google Calendar
+- [📔 WORKFLOW.md](docs/WORKFLOW.md) - Процессы разработки
+- [✅ MIGRATION-COMPLETE.md](docs/MIGRATION-COMPLETE.md) - Статус миграции
+
+## ⚠️ Требования и ограничения
+
+- Python 3.10+
+- ffmpeg
 - Максимальный размер файла: **20 МБ** (ограничение Telegram Bot API)
-- Поддерживаемые форматы: OGG, MP3, MP4, M4A, WAV и другие (через ffmpeg)
+- Поддерживаемые форматы: OGG, MP3, MP4, M4A, WAV и другие
+
+## 📄 Лицензия
+
+MIT
+
+## 🤝 Контакты
+
+Telegram: [@softmachina_bot](https://t.me/softmachina_bot)
 
 ## 🛠️ Технологии
 
