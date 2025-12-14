@@ -13,8 +13,6 @@ from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
-from calendar_parser import parse_datetime, calculate_end_time
-
 
 # Области доступа для Google Calendar API
 SCOPES = ['https://www.googleapis.com/auth/calendar']
