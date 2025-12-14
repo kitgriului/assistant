@@ -21,12 +21,4 @@ def create_action_keyboard(calendar_enabled: bool = False) -> InlineKeyboardMark
         [InlineKeyboardButton(text="📊 Сделать саммари", callback_data="action:summary")],
     ]
     
-    if calendar_enabled:
-        buttons.append([
-            InlineKeyboardButton(
-                text="📆 Создать событие в календаре",
-                callback_data="action:calendar"
-            )
-        ])
-    
     return InlineKeyboardMarkup(inline_keyboard=buttons)
