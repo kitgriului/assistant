@@ -49,14 +49,24 @@ def register_handlers(bot: "WhisperBot") -> None:
     @bot.dp.callback_query(F.data.startswith("action:"))
     async def handle_action(callback: CallbackQuery) -> None:
         """Handle action button callbacks."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
         if not callback.data:
+            logger.warning("Received callback with no data")
             return
         
+        logger.info(f"Received callback: {callback.data}")
         await callback.answer()
         
         if callback.data == CALLBACK_NOTE:
+            logger.info("Calling create_note")
             await bot.create_note(callback)
         elif callback.data == CALLBACK_MEETING:
+            logger.info("Calling create_meeting")
             await bot.create_meeting(callback)
         elif callback.data == CALLBACK_SUMMARY:
+            logger.info("Calling create_summary")
             await bot.create_summary(callback)
+        else:
+            logger.warning(f"Unknown callback data: {callback.data}")
