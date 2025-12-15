@@ -154,7 +154,7 @@ class GPTService:
                 "role": "user",
                 "content": f"Текст для обработки:\n\n{text}\n\n---\n\nЗадание: {user_prompt}"
             }
-        ]</p>
+        ]
         
         return await self._complete(messages, temperature=0.7)
     
