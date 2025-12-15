@@ -39,7 +39,7 @@ def create_ics_file(meeting_info: Dict[str, Any], output_dir: str = "/tmp") -> O
         cal.add('prodid', '-//Whisper Bot Calendar//EN')
         cal.add('version', '2.0')
         cal.add('calscale', 'GREGORIAN')
-        cal.add('method', 'PUBLISH')
+        cal.add('method', 'REQUEST')
         
         # Создаем событие
         event = Event()
@@ -63,10 +63,16 @@ def create_ics_file(meeting_info: Dict[str, Any], output_dir: str = "/tmp") -> O
                 end_dt = calculate_end_time(start_dt, duration)
         else:
             # Если время не указано, создаем событие на весь день
+            import uuid
+            from zoneinfo import ZoneInfo
             start_dt = datetime.strptime(meeting_info['date'], "%Y-%m-%d").date()
             end_dt = start_dt
             event.add('dtstart', start_dt)
             event.add('dtend', end_dt)
+            event.add('uid', str(uuid.uuid4()))
+            event.add('dtstamp', datetime.now(ZoneInfo('UTC')))
+            event.add('status', 'CONFIRMED')
+            event.add('sequence', 0)
             event.add('summary', meeting_info['title'])
             
             if meeting_info.get('description'):
@@ -89,6 +95,15 @@ def create_ics_file(meeting_info: Dict[str, Any], output_dir: str = "/tmp") -> O
         event.add('dtstart', start_dt)
         event.add('dtend', end_dt)
         
+        # Добавляем уникальный ID и метаданные
+        import uuid
+        from zoneinfo import ZoneInfo
+        event.add('uid', str(uuid.uuid4()))
+        event.add('dtstamp', datetime.now(ZoneInfo('UTC')))
+        event.add('status', 'CONFIRMED')
+        event.add('sequence', 0)
+        event.add('transp', 'OPAQUE')
+        
         # Добавляем описание
         if meeting_info.get('description'):
             event.add('description', meeting_info['description'])
@@ -109,11 +124,6 @@ def create_ics_file(meeting_info: Dict[str, Any], output_dir: str = "/tmp") -> O
         alarm.add('trigger', '-PT15M')
         alarm.add('description', f"Напоминание: {meeting_info['title']}")
         event.add_component(alarm)
-        
-        # Добавляем уникальный ID
-        import uuid
-        event.add('uid', str(uuid.uuid4()))
-        event.add('dtstamp', datetime.now())
         
         # Добавляем событие в календарь
         cal.add_component(event)
