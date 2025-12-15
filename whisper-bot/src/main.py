@@ -203,6 +203,7 @@ class WhisperBot:
             await processing_msg.edit_text("❌ Календарная функция недоступна")
             return
         
+        logger.info("Extracting meeting info from text")
         # Extract meeting info using GPT
         meeting_info = await asyncio.to_thread(
             extract_meeting_info,
@@ -211,17 +212,22 @@ class WhisperBot:
         )
         
         if not meeting_info:
+            logger.warning("No meeting info extracted")
             await processing_msg.edit_text(
                 "❌ Не удалось найти информацию о встрече.\n\n"
                 "Убедитесь что указаны дата и время."
             )
             return
         
+        logger.info(f"Meeting info extracted: {meeting_info}")
+        
         # Format summary
         summary = format_meeting_summary(meeting_info)
         
+        logger.info("Creating ICS file")
         # Create .ics file
         ics_path = await asyncio.to_thread(create_ics_file, meeting_info)
+        logger.info(f"ICS file created: {ics_path}")
         
         if ics_path:
             await processing_msg.edit_text(
