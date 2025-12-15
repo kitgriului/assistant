@@ -114,18 +114,49 @@ class GPTService:
             {
                 "role": "system",
                 "content": (
-                    "Ты помощник, который создаёт структурированные саммари из текста. "
-                    "Убери все повторы, слова-паразиты, шум и лишние слова. "
-                    "Сохрани все факты, смысл и последовательность. Оформи текст в виде чётких тезисов с эмодзи."
+                    "Ты помощник, который создаёт краткое саммари из текста в информационном стиле. "
+                    "Убери все повторы, слова-паразиты и лишние слова. "
+                    "Сохрани все ключевые факты, идеи и выводы. "
+                    "Оформи текст чётко и лаконично, без эмодзи и специального форматирования. "
+                    "Используй простые абзацы или нумерованный список для структуры."
                 )
             },
             {
                 "role": "user",
-                "content": f"Создай структурированное саммари из этого текста:\n\n{text}"
+                "content": f"Создай краткое саммари из этого текста:\n\n{text}"
             }
         ]
         
         return await self._complete(messages, temperature=0.5)
+    
+    async def process_with_prompt(self, text: str, user_prompt: str) -> str:
+        """
+        Process text with custom user prompt.
+        
+        Args:
+            text: Transcribed text
+            user_prompt: Custom prompt from user
+            
+        Returns:
+            Processed text
+        """
+        logger.info(f"Processing with custom prompt: {user_prompt[:50]}...")
+        
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "Ты помощник, который обрабатывает расшифровку аудио согласно указаниям пользователя. "
+                    "Выполни запрос пользователя точно и качественно."
+                )
+            },
+            {
+                "role": "user",
+                "content": f"Текст для обработки:\n\n{text}\n\n---\n\nЗадание: {user_prompt}"
+            }
+        ]</p>
+        
+        return await self._complete(messages, temperature=0.7)
     
     async def _complete(
         self,

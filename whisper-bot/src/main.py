@@ -61,6 +61,7 @@ class WhisperBot:
         self.bot = Bot(token=config.bot_token)
         self.dp = Dispatcher()
         self.storage = TranscriptionStorage()
+        self.awaiting_prompt: dict[int, bool] = {}  # Track users waiting for prompt input
         
         # Register handlers
         register_handlers(self)
@@ -188,6 +189,75 @@ class WhisperBot:
             )
         except Exception as e:
             logger.exception(f"Summary creation failed: {e}")
+            await processing_msg.edit_text(constants.ERR_PROCESSING_FAILED)
+    
+    async def request_prompt(self, callback: CallbackQuery) -> None:
+        """Request custom prompt from user."""
+        chat_id = callback.message.chat.id
+        text = self._get_transcription(chat_id)
+        if not text:
+            await callback.message.answer(constants.ERR_PROCESSING_FAILED)
+            return
+        
+        self.awaiting_prompt[chat_id] = True
+        await callback.message.answer(constants.MSG_WAITING_FOR_PROMPT)
+    
+    async def handle_prompt_input(self, message: Message) -> None:
+        """Handle user prompt input (text or voice)."""
+        chat_id = message.chat.id
+        
+        # Check if user is waiting for prompt
+        if not self.awaiting_prompt.get(chat_id):
+            return
+        
+        # Get transcription
+        text = self._get_transcription(chat_id)
+        if not text:
+            await message.answer(constants.ERR_PROCESSING_FAILED)
+            self.awaiting_prompt.pop(chat_id, None)
+            return
+        
+        # Get prompt from message
+        user_prompt = None
+        if message.text:
+            user_prompt = message.text
+        elif message.voice:
+            # Transcribe voice prompt
+            processing_msg = await message.answer(constants.MSG_TRANSCRIBING)
+            try:
+                with tempfile.TemporaryDirectory(prefix="whisper_bot_") as tmpdir:
+                    tmpdir_path = Path(tmpdir)
+                    file_id = message.voice.file_id
+                    src_path = tmpdir_path / "prompt.ogg"
+                    
+                    tg_file = await self.bot.get_file(file_id)
+                    await self.bot.download(tg_file, destination=src_path, timeout=30)
+                    
+                    user_prompt = await self.whisper.transcribe(src_path)
+                await processing_msg.delete()
+            except Exception as e:
+                logger.exception(f"Failed to transcribe voice prompt: {e}")
+                await message.answer(constants.ERR_TRANSCRIPTION_FAILED)
+                self.awaiting_prompt.pop(chat_id, None)
+                return
+        
+        if not user_prompt:
+            await message.answer("❌ Не удалось получить промпт")
+            self.awaiting_prompt.pop(chat_id, None)
+            return
+        
+        # Process with custom prompt
+        self.awaiting_prompt.pop(chat_id, None)
+        processing_msg = await message.answer(constants.MSG_PROCESSING_PROMPT)
+        
+        try:
+            result = await self.gpt.process_with_prompt(text, user_prompt)
+            await processing_msg.edit_text(
+                f"🧠 **Результат:**\n\n{result}",
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            logger.exception(f"Custom prompt processing failed: {e}")
             await processing_msg.edit_text(constants.ERR_PROCESSING_FAILED)
     
     def _get_transcription(self, chat_id: int) -> Optional[str]:

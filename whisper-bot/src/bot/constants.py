@@ -16,12 +16,14 @@ WELCOME_MESSAGE = """🎙 **Бот для расшифровки аудио с �
 Просто отправь мне голосовое сообщение или аудиофайл!"""
 
 # Status messages
-MSG_PROCESSING = "⏳ Обрабатываю..."
-MSG_TRANSCRIBING = "🎤 Расшифровываю аудио..."
+MSG_PROCESSING = "⌛ Обрабатываю..."
+MSG_TRANSCRIBING = "🎙 Расшифровываю аудио..."
 MSG_CONVERTING = "🔄 Конвертирую медиа..."
 MSG_CREATING_NOTE = "🗒 Создаю заметку..."
 MSG_CREATING_EVENT = "📅 Создаю событие..."
 MSG_CREATING_SUMMARY = "📊 Создаю саммари..."
+MSG_WAITING_FOR_PROMPT = "✏️ Отправьте промпт для обработки текста (текстом или голосом)."
+MSG_PROCESSING_PROMPT = "🧠 Обрабатываю по вашему промпту..."
 
 # Error messages
 ERR_FILE_TOO_LARGE = "❌ Файл слишком большой. Максимальный размер: {max_size} МБ"
@@ -33,5 +35,6 @@ ERR_NO_MEETING_INFO = "❌ Не удалось извлечь информаци
 
 # Callback data prefixes
 CALLBACK_NOTE = "action:note"
+CALLBACK_PROMPT = "action:prompt"
 CALLBACK_MEETING = "action:meeting"
 CALLBACK_SUMMARY = "action:summary"

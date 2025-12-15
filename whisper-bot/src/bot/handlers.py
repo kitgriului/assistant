@@ -10,6 +10,7 @@ from .constants import (
     WELCOME_MESSAGE,
     MSG_PROCESSING,
     CALLBACK_NOTE,
+    CALLBACK_PROMPT,
     CALLBACK_MEETING,
     CALLBACK_SUMMARY,
 )
@@ -46,6 +47,11 @@ def register_handlers(bot: "WhisperBot") -> None:
         """Handle video files."""
         await bot.process_media(message, "video")
     
+    @bot.dp.message(F.text)
+    async def handle_text(message: Message) -> None:
+        """Handle text messages (for custom prompts)."""
+        await bot.handle_prompt_input(message)
+    
     @bot.dp.callback_query(F.data.startswith("action:"))
     async def handle_action(callback: CallbackQuery) -> None:
         """Handle action button callbacks."""
@@ -59,7 +65,10 @@ def register_handlers(bot: "WhisperBot") -> None:
         logger.info(f"Received callback: {callback.data}")
         await callback.answer()
         
-        if callback.data == CALLBACK_NOTE:
+        if callback.data == CALLBACK_PROMPT:
+            logger.info("Calling request_prompt")
+            await bot.request_prompt(callback)
+        elif callback.data == CALLBACK_NOTE:
             logger.info("Calling create_note")
             await bot.create_note(callback)
         elif callback.data == CALLBACK_MEETING:
