@@ -16,9 +16,9 @@ def create_action_keyboard(calendar_enabled: bool = False) -> InlineKeyboardMark
         Inline keyboard markup
     """
     buttons = [
-        [InlineKeyboardButton(text="🧠 Обработать с промптом", callback_data="action:prompt")],
-        [InlineKeyboardButton(text="📅 Создать встречу", callback_data="action:meeting")],
         [InlineKeyboardButton(text="📊 Сделать саммари", callback_data="action:summary")],
+        [InlineKeyboardButton(text="✍️ Обработать с промптом", callback_data="action:prompt")],
+        [InlineKeyboardButton(text="📅 Создать встречу", callback_data="action:meeting")],
     ]
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)

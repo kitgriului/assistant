@@ -203,7 +203,7 @@ class WhisperBot:
         await callback.message.answer(constants.MSG_WAITING_FOR_PROMPT)
     
     async def handle_prompt_input(self, message: Message) -> None:
-        """Handle user prompt input (text or voice)."""
+        """Handle user prompt input (text only)."""
         chat_id = message.chat.id
         
         # Check if user is waiting for prompt
@@ -217,34 +217,12 @@ class WhisperBot:
             self.awaiting_prompt.pop(chat_id, None)
             return
         
-        # Get prompt from message
-        user_prompt = None
-        if message.text:
-            user_prompt = message.text
-        elif message.voice:
-            # Transcribe voice prompt
-            processing_msg = await message.answer(constants.MSG_TRANSCRIBING)
-            try:
-                with tempfile.TemporaryDirectory(prefix="whisper_bot_") as tmpdir:
-                    tmpdir_path = Path(tmpdir)
-                    file_id = message.voice.file_id
-                    src_path = tmpdir_path / "prompt.ogg"
-                    
-                    tg_file = await self.bot.get_file(file_id)
-                    await self.bot.download(tg_file, destination=src_path, timeout=30)
-                    
-                    user_prompt = await self.whisper.transcribe(src_path)
-                await processing_msg.delete()
-            except Exception as e:
-                logger.exception(f"Failed to transcribe voice prompt: {e}")
-                await message.answer(constants.ERR_TRANSCRIPTION_FAILED)
-                self.awaiting_prompt.pop(chat_id, None)
-                return
-        
-        if not user_prompt:
-            await message.answer("❌ Не удалось получить промпт")
-            self.awaiting_prompt.pop(chat_id, None)
+        # Get prompt from text message only
+        if not message.text:
+            await message.answer("❌ Пожалуйста, отправьте текстовое сообщение с промптом.")
             return
+        
+        user_prompt = message.text
         
         # Process with custom prompt
         self.awaiting_prompt.pop(chat_id, None)

@@ -22,7 +22,7 @@ MSG_CONVERTING = "🔄 Конвертирую медиа..."
 MSG_CREATING_NOTE = "🗒 Создаю заметку..."
 MSG_CREATING_EVENT = "📅 Создаю событие..."
 MSG_CREATING_SUMMARY = "📊 Создаю саммари..."
-MSG_WAITING_FOR_PROMPT = "✏️ Отправьте промпт для обработки текста (текстом или голосом)."
+MSG_WAITING_FOR_PROMPT = "✏️ Напишите, что нужно сделать с расшифровкой."
 MSG_PROCESSING_PROMPT = "🧠 Обрабатываю по вашему промпту..."
 
 # Error messages
