@@ -127,12 +127,14 @@ def parse_datetime(date_str: str, time_str: str, timezone: str = "Europe/Moscow"
         timezone: Таймзона (по умолчанию Moscow)
         
     Returns:
-        datetime объект с таймзоной
+        datetime объект в UTC
     """
     try:
         dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
         tz = ZoneInfo(timezone)
-        return dt.replace(tzinfo=tz)
+        dt_local = dt.replace(tzinfo=tz)
+        # Конвертируем в UTC для ICS файла
+        return dt_local.astimezone(ZoneInfo('UTC'))
     except Exception as e:
         print(f"Ошибка парсинга даты/времени: {e}")
         raise
