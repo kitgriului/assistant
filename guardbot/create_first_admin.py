@@ -6,12 +6,15 @@ Usage: python create_first_admin.py <telegram_id> [username]
 
 import asyncio
 import sys
+import os
 from pathlib import Path
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from database.session import get_db
+# Import config to initialize DB
+from bot.config import DB_URL
+from database.session import init_db, get_session
 from database.models import User
 from utils.roles import Role
 
@@ -20,7 +23,11 @@ async def create_admin(telegram_id: int, username: str = None):
     """Create first admin user"""
     print(f"Creating admin user with Telegram ID: {telegram_id}")
     
-    async for db in get_db():
+    # Initialize database
+    await init_db(DB_URL)
+    
+    # Create session
+    async with get_session() as db:
         # Check if user already exists
         from sqlalchemy import select
         result = await db.execute(
@@ -47,7 +54,7 @@ async def create_admin(telegram_id: int, username: str = None):
             print(f"✓ Created admin user: {username or f'admin_{telegram_id}'}")
         
         print("\nAdmin user created successfully!")
-        print("You can now start the bot and use /start command")
+        print("You can now restart the bot and use /start command")
 
 
 if __name__ == "__main__":
