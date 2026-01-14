@@ -17,9 +17,6 @@ services:
       - TZ=Europe/Moscow
     
     volumes:
-      # Persist database (using named volume for better permissions)
-      - guardbot_data:/app
-      
       # Persist uploaded media
       - ./data/media:/app/data/media
       
@@ -57,11 +54,6 @@ services:
     # Network mode (optional, if you need specific networking)
     # network_mode: "host"
 
-# Named volumes for data persistence
-volumes:
-  guardbot_data:
-    driver: local
-
 # Optional: Add a separate service for database backups
 # services:
 #   backup:
@@ -71,7 +63,7 @@ volumes:
 #       - ./backups:/backups
 #     command: >
 #       sh -c "while true; do
-#         cp /data/guardbot.db /backups/guardbot_$$(date +%Y%m%d_%H%M%S).db;
+#         docker cp guardbot:/app/guardbot.db /backups/guardbot_$$(date +%Y%m%d_%H%M%S).db;
 #         find /backups -type f -mtime +7 -delete;
 #         sleep 86400;
 #       done"
