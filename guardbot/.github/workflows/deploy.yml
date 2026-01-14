@@ -1,0 +1,67 @@
+name: Deploy GuardBot to Production
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    name: Deploy to Server
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H 37.233.85.194 >> ~/.ssh/known_hosts
+      
+      - name: Deploy to server
+        env:
+          SERVER: 37.233.85.194
+          USER: root
+          DEPLOY_PATH: /opt/guardbot
+        run: |
+          # Update code on server
+          ssh ${USER}@${SERVER} "cd ${DEPLOY_PATH} && git pull origin main"
+          
+          # Restart bot
+          ssh ${USER}@${SERVER} "cd ${DEPLOY_PATH} && docker compose down && docker compose up -d --build"
+          
+          # Wait for startup
+          sleep 10
+          
+          # Check health
+          ssh ${USER}@${SERVER} "cd ${DEPLOY_PATH} && docker compose ps"
+      
+      - name: Verify deployment
+        env:
+          SERVER: 37.233.85.194
+          USER: root
+          DEPLOY_PATH: /opt/guardbot
+        run: |
+          # Check if container is running
+          RUNNING=$(ssh ${USER}@${SERVER} "cd ${DEPLOY_PATH} && docker compose ps --filter 'status=running' -q | wc -l")
+          if [ "$RUNNING" -eq "1" ]; then
+            echo "✓ Bot is running successfully!"
+          else
+            echo "✗ Bot failed to start"
+            ssh ${USER}@${SERVER} "cd ${DEPLOY_PATH} && docker compose logs --tail=50"
+            exit 1
+          fi
+      
+      - name: Show logs
+        if: always()
+        env:
+          SERVER: 37.233.85.194
+          USER: root
+          DEPLOY_PATH: /opt/guardbot
+        run: |
+          echo "Recent logs:"
+          ssh ${USER}@${SERVER} "cd ${DEPLOY_PATH} && docker compose logs --tail=30"
