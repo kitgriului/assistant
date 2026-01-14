@@ -17,8 +17,8 @@ services:
       - TZ=Europe/Moscow
     
     volumes:
-      # Persist database
-      - ./guardbot.db:/app/guardbot.db
+      # Persist database (using named volume for better permissions)
+      - guardbot_data:/app
       
       # Persist uploaded media
       - ./data/media:/app/data/media
@@ -57,12 +57,17 @@ services:
     # Network mode (optional, if you need specific networking)
     # network_mode: "host"
 
+# Named volumes for data persistence
+volumes:
+  guardbot_data:
+    driver: local
+
 # Optional: Add a separate service for database backups
 # services:
 #   backup:
 #     image: alpine:latest
 #     volumes:
-#       - ./guardbot.db:/data/guardbot.db:ro
+#       - guardbot_data:/data:ro
 #       - ./backups:/backups
 #     command: >
 #       sh -c "while true; do
