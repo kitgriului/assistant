@@ -39,8 +39,9 @@ COPY . .
 RUN mkdir -p /app/data/media /app/data/export /app/logs && \
     chown -R guardbot:guardbot /app
 
-# Switch to non-root user
-USER guardbot
+# Note: Running as root for volume permissions
+# In production, consider using proper volume ownership
+# USER guardbot
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
